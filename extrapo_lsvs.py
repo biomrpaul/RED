@@ -12,7 +12,10 @@ import sys
 sys.path.append("/opt/majiq")
 from voila import vlsv
 
-exp_name= sys.argv[1]
+def expected_dpsi(bins):
+	return sum(np.array(bins) * np.arange(-1+1./len(bins), 1., 2./len(bins)))
+
+exp_name = sys.argv[1]
 subname1 = sys.argv[2]
 subname2 = sys.argv[3]
 majiq_loc = "/opt/majiq"
@@ -30,7 +33,7 @@ if count_reads == "count_reads":
 	reads = commands.getoutput('wc -l ' + fastq_loc)
 	total_reads = int(reads[:reads.find(" ")]) / 4.0
 else:	
-	total_reads = 11743827.0
+	total_reads = 33088629.0
 print("Total: " + str(total_reads))
 name=exp_name
 
@@ -67,8 +70,8 @@ print("Calculating read count distribution")
 ###Calculates and stores histogram density values
 ###Uncomment following section to plot histogram
 print("Max read count: " + str(max(read_counts)))
-binsize = sys.argiv[5]
-counts, bins, bars = plt.hist(read_counts, bins=int(max(read_counts)/int(binsize)))
+binsize = int(sys.argv[5])
+counts, bins, bars = plt.hist(read_counts, bins=[min(read_counts)+i*binsize for i in range(int(np.ceil(max(read_counts)/binsize))) ])
 #plt.hist(read_counts, bins=4000, range=[0,1000])
 #plt.xlabel("LSV Total Read Count")
 #plt.ylabel("Frequency")
@@ -102,7 +105,7 @@ scaled = {}
 for x in scaled_c:
     vals = x.strip("\n").split("\t") 
     num_reads.append(float(vals[0])*ratio)
-    scaled[int(float(vals[0]))] = vals[1]
+    scaled[int(float(vals[0]))] = [float(vals[1]),float(vals[2]),float(vals[3])]
     num_distinct.append(vals[1])
     low_bound.append(vals[2])
     high_bound.append(float(vals[3]))
@@ -134,7 +137,7 @@ for lsvObj in bins.keys():
         binsList = bins[lsvObj]
         sig = []
         for i in range(len(binsList)):
-                sig.append(vlsv.get_expected(vlsv.collapse_matrix(binsList[i])))
+                sig.append(expected_dpsi(vlsv.collapse_matrix(binsList[i])))
         sig_values[lsvObj] = sig
 
 
@@ -142,39 +145,84 @@ sigReads = []
 
 numSig = 0
 for lsv in sig_values.keys():
-        if sum([1 for x in sig_values[lsv] if float(x) > .8 or float(x) <.2 ]) > 0:
+        if sum([1 for x in sig_values[lsv] if float(abs(x)) >.2 ]) > 0:
              sigReads.append(lsvs[lsv])   
-	     print lsv
 		
-print len(sigReads)
-print sigReads
 
-counts, bins, bars = plt.hist(sigReads, bins=int(max(sigReads)/int(binsize)))
-hist_file_o = open(name + "_delta_hist.txt","w")
+sigReadBins = {}
+sigReadBinOrder = []
+binBracket = 3
+while binBracket < max(sigReads):
+	sigReadBins[str(binBracket) + "-" + str(binBracket+3)] = 0
+        sigReadBinOrder.append(  str(binBracket) + "-" + str(binBracket+binsize-1) )
+	binBracket += binsize
 
-for i in range(0,len(counts),1):
-        hist_file_o.write(str(bins[i]) + "\t" + str(counts[i])+"\n")
+numSig = 0
+for i in range(len(sigReads)):
+	binNum = float(sigReads[i] - 2) / float(binsize)
+	if sigReadBins >= 10:
+		numSig += 1
+		sigReadBins[sigReadBinOrder[int(np.ceil(binNum)) - 1]] += 1
 
-hist_file_o.close()
+proports = []
+for i in range(len(sigReadBinOrder)):
+	proports.append(sigReadBins[sigReadBinOrder[i]] / counts[i])
 
+print "Number of delta psi LSVs, with read cov. > 10 = " + str(numSig)
 
-print numSig
+expected_deltaFile = open(name + "_expected_delta_lsvs_over_L_prime.txt", "w")
+expected_deltaFile2 = open(name + "_expected_delta_lsvs_over_N_prime.txt", "w")
+exp_delta_lsvs = []
 ##Create new histograms based on the expected amount of captured distinct LSVs from preseq at <population>
-for population in [50000,100000,150000,200000,250000,300000,400000,500000]:
+populations = [25000*i for i in range(106)]
+for population in populations:
 	#Creates a ratio of the ls
+	ratio2 = float(scaled[population][0])/lsv_amount
+	ratioLow = float(scaled[population][1])/lsv_amount
+	ratioHigh = float(scaled[population][2])/lsv_amount
+	total_amount = 0
+	total_low = 0
+	total_high = 0
+	binBracket = 3
+        for i in range(len(sigReadBinOrder)):
+	
+		if np.isnan(proports[i]) == False:
+			total_amount += counts[i] * ratio2 * proports[i]
+			total_low += counts[i] * ratioLow * proports[i]	
+			total_high += counts[i] * ratioHigh * proports[i]
 
-	print(str(scaled[population]) + " expected LSVs from " + str(population) + "\n") 
-	ratio2 = float(scaled[population])/lsv_amount
-	print("Expected LSVs to actual LSVs " + str(ratio2) + "\n")
-        new_histFile = open(name + "_at_" + str(population) + "_lsv_reads.txt", "w")
-	binBracket = 2
-        for i in range(0,len(counts),1):
-                new_histFile.write(str(binBracket) + "-" + str(binBracket+3)  + "\t" + str(counts[i] * ratio2) + "\n")
-		binBracket += 4
-        new_histFile.close()    
+
+	exp_delta_lsvs.append([total_amount, total_low, total_high])
+	expected_deltaFile.write(str(population) + "\t" + str(total_amount) + "\t" + str(total_low) + "\t" + str(total_high) +  "\n")
+	expected_deltaFile.write(str(population * ratio) + "\t" + str(total_amount) + "\t" + str(total_low) + "\t" + str(total_high) + "\n")
 
 
+plt.plot(populations, [amount[0] for amount in exp_delta_lsvs])
+plt.plot(populations, [amount[1] for amount in exp_delta_lsvs], "b--")
+plt.plot(populations, [amount[2] for amount in exp_delta_lsvs], "b--")
+plt.plot(lsv_reads, numSig, "ro")
+plt.ylabel("Expected # of Delta Psi LSVs")
+plt.xlabel("# of Reads Supporting LSVs")
+plt.title("Extrapolated Complexity Plot")
+plt.axis([0,max(populations), 0, 1.10*max([amount[2] for amount in exp_delta_lsvs])])
+ax=plt.gca()
+ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+plt.savefig(name +"_exp_delta_LSVS_over_L_prime.png")
+plt.close()
 
+populations2 = [int(x)*ratio for x in populations]
+plt.plot(populations2, [amount[0] for amount in exp_delta_lsvs])
+plt.plot(populations2, [amount[1] for amount in exp_delta_lsvs], "b--")
+plt.plot(populations2, [amount[2] for amount in exp_delta_lsvs], "b--")
+plt.plot(total_reads, numSig, "ro")
+plt.ylabel("Expected # of Delta Psi LSVs")
+plt.xlabel("# of Sequenced Reads")
+plt.title("Extrapolated Complexity Plot")
+plt.axis([0,max(populations2), 0, 1.10*max([amount[2] for amount in exp_delta_lsvs])])
+ax=plt.gca()
+ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+plt.savefig(name +"_exp_delta_LSVS_over_N_prime.png")
+plt.close()
 
 
 
