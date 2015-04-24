@@ -31,9 +31,9 @@ run_build = sys.argv[8]
 if count_reads == "count_reads":
 	print("Calculating total amount of reads")
 	reads = commands.getoutput('wc -l ' + fastq_loc)
-	total_reads = int(reads[:reads.find(" ")]) / 4.0
+	total_reads = int(reads[:reads.find(" ")]) / 2.0
 else:	
-	total_reads = 33088629.0
+	total_reads = 33088629.0 * 2
 print("Total: " + str(total_reads))
 name=exp_name
 
@@ -72,20 +72,24 @@ print("Calculating read count distribution")
 print("Max read count: " + str(max(read_counts)))
 binsize = int(sys.argv[5])
 counts, bins, bars = plt.hist(read_counts, bins=[min(read_counts)+i*binsize for i in range(int(np.ceil(max(read_counts)/binsize))) ])
+print sum(counts)
 #plt.hist(read_counts, bins=4000, range=[0,1000])
 #plt.xlabel("LSV Total Read Count")
 #plt.ylabel("Frequency")
 #plt.savefig(name + "_read_count_hist_zoomed.png")
 hist_file_o = open(name + "_hist_values.txt","w")
-
+preseq_reads = 0
 for i in range(0,len(counts),1):
 	hist_file_o.write(str(i+1) + "\t" + str(counts[i])+"\n")
-
+	preseq_reads += (i+1) * counts[i]
 hist_file_o.close()
 
 ###Extrapolates with preseq   
 print("Running preseq")
 preseq_command = preseq_loc + "preseq lc_extrap -o " + name + "_extra_bin" + "_" + str(binsize) + ".txt -H " + name + "_hist_values.txt"
+os.system(preseq_command)
+
+preseq_command = preseq_loc + "preseq c_curve -o " + name + "_c_curve.txt -H " +  name + "_hist_values.txt"
 os.system(preseq_command)
 
 print("preseq completed")
@@ -95,7 +99,7 @@ scaled_c = open(name + "_extra_bin_" + str(binsize) + ".txt","r")
 ###Parses the parseq output 
 ratio = total_reads/lsv_reads
 print("LSV reads to Total Reads Ratio: " + str(ratio))
-
+preseq_to_lsv_reads_ratio = float(lsv_reads) / float(preseq_reads)
 num_reads = []
 num_distinct = [] 
 low_bound = []
@@ -104,21 +108,38 @@ scaled_c.next()
 scaled = {}
 for x in scaled_c:
     vals = x.strip("\n").split("\t") 
-    num_reads.append(float(vals[0])*ratio)
+    num_reads.append(float(vals[0])*ratio*preseq_to_lsv_reads_ratio)
     scaled[int(float(vals[0]))] = [float(vals[1]),float(vals[2]),float(vals[3])]
     num_distinct.append(vals[1])
     low_bound.append(vals[2])
     high_bound.append(float(vals[3]))
 
+
+##Parses c_curve values
+curve = open(name + "_c_curve.txt", "r")
+curve.next()
+num_reads2 = []
+num_distinct2 = []
+scaled2 = {}
+for x in curve:
+	line = x.strip("\n").split("\t")
+	num_reads2.append(float(line[0])*ratio*preseq_to_lsv_reads_ratio)
+	num_distinct2.append(line[1])
+	scaled2[float(line[0])] = float(line[1])
+
+print "C_curve amount of reads : " + str(preseq_reads)
+
 print("Plotting extrapolated values")
 ###Plots the extrapolated values from preseq (only the first 150M reads)
-plt.plot(num_reads, num_distinct)
-plt.plot(num_reads, low_bound, "b--")
-plt.plot(num_reads, high_bound, "b--")
+plt.plot(num_reads, num_distinct, label="Preseq	Extrapo.")
+plt.plot(num_reads, low_bound, "b--", label="Upper CI")
+plt.plot(num_reads, high_bound, "b--", label="Lower CI")
+plt.plot(num_reads2, num_distinct2, "go", label="Preseq down samp.")
+plt.plot(total_reads, lsv_amount, "ro", label="True Amount")
 plt.ylabel("# of Distinct LSVs (Unscaled)")
 plt.xlabel("# of Reads")
 plt.title("Extrapolated Complexity Plot")
-plt.axis([0,150000000, 0, 1.10*max(high_bound)])
+plt.axis([0,250000000/ ratio, 0, 25000])
 ax=plt.gca()
 ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
 plt.savefig(name +"_bin" + str(binsize) + "_extrapolated.png")
@@ -153,10 +174,11 @@ sigReadBins = {}
 sigReadBinOrder = []
 binBracket = 3
 while binBracket < max(sigReads):
-	sigReadBins[str(binBracket) + "-" + str(binBracket+3)] = 0
+	sigReadBins[str(binBracket) + "-" + str(binBracket+binsize-1)] = 0
         sigReadBinOrder.append(  str(binBracket) + "-" + str(binBracket+binsize-1) )
 	binBracket += binsize
 
+print sigReadBins.keys()
 numSig = 0
 for i in range(len(sigReads)):
 	binNum = float(sigReads[i] - 2) / float(binsize)
@@ -174,6 +196,9 @@ expected_deltaFile = open(name + "_expected_delta_lsvs_over_L_prime.txt", "w")
 expected_deltaFile2 = open(name + "_expected_delta_lsvs_over_N_prime.txt", "w")
 exp_delta_lsvs = []
 ##Create new histograms based on the expected amount of captured distinct LSVs from preseq at <population>
+
+
+print "Expected LSVs: " + str(scaled[875000])
 populations = [25000*i for i in range(106)]
 for population in populations:
 	#Creates a ratio of the ls
@@ -183,7 +208,6 @@ for population in populations:
 	total_amount = 0
 	total_low = 0
 	total_high = 0
-	binBracket = 3
         for i in range(len(sigReadBinOrder)):
 	
 		if np.isnan(proports[i]) == False:
@@ -193,24 +217,25 @@ for population in populations:
 
 
 	exp_delta_lsvs.append([total_amount, total_low, total_high])
-	expected_deltaFile.write(str(population) + "\t" + str(total_amount) + "\t" + str(total_low) + "\t" + str(total_high) +  "\n")
-	expected_deltaFile.write(str(population * ratio) + "\t" + str(total_amount) + "\t" + str(total_low) + "\t" + str(total_high) + "\n")
+	expected_deltaFile.write(str(population*preseq_to_lsv_reads_ratio) + "\t" + str(total_amount) + "\t" + str(total_low) + "\t" + str(total_high) +  "\n")
+	expected_deltaFile2.write(str(population * ratio*preseq_to_lsv_reads_ratio) + "\t" + str(total_amount) + "\t" + str(total_low) + "\t" + str(total_high) + "\n")
 
 
-plt.plot(populations, [amount[0] for amount in exp_delta_lsvs])
-plt.plot(populations, [amount[1] for amount in exp_delta_lsvs], "b--")
-plt.plot(populations, [amount[2] for amount in exp_delta_lsvs], "b--")
-plt.plot(lsv_reads, numSig, "ro")
+populations3 = [int(x)*preseq_to_lsv_reads_ratio for x in populations]
+plt.plot(populations3, [amount[0] for amount in exp_delta_lsvs], label="Preseq extrapo.")
+plt.plot(populations3, [amount[1] for amount in exp_delta_lsvs], "b--", label="Lower CI")
+plt.plot(populations3, [amount[2] for amount in exp_delta_lsvs], "b--", label="Upper CI")
+plt.plot(lsv_reads, numSig, "ro", label="True Data")
 plt.ylabel("Expected # of Delta Psi LSVs")
 plt.xlabel("# of Reads Supporting LSVs")
 plt.title("Extrapolated Complexity Plot")
-plt.axis([0,max(populations), 0, 1.10*max([amount[2] for amount in exp_delta_lsvs])])
+plt.axis([0,250000000/ ratio, 0, 1200])
 ax=plt.gca()
 ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
 plt.savefig(name +"_exp_delta_LSVS_over_L_prime.png")
 plt.close()
 
-populations2 = [int(x)*ratio for x in populations]
+populations2 = [int(x)*ratio*preseq_to_lsv_reads_ratio for x in populations]
 plt.plot(populations2, [amount[0] for amount in exp_delta_lsvs])
 plt.plot(populations2, [amount[1] for amount in exp_delta_lsvs], "b--")
 plt.plot(populations2, [amount[2] for amount in exp_delta_lsvs], "b--")
@@ -218,13 +243,20 @@ plt.plot(total_reads, numSig, "ro")
 plt.ylabel("Expected # of Delta Psi LSVs")
 plt.xlabel("# of Sequenced Reads")
 plt.title("Extrapolated Complexity Plot")
-plt.axis([0,max(populations2), 0, 1.10*max([amount[2] for amount in exp_delta_lsvs])])
+plt.axis([0,250000000, 0, 1200])
 ax=plt.gca()
 ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
 plt.savefig(name +"_exp_delta_LSVS_over_N_prime.png")
 plt.close()
 
-
+stats = open(name + "_stats.txt", "w")
+stats.write("Total_reads\t" + str(total_reads) + "\n")
+stats.write("lsv_reads\t" + str(lsv_reads) + "\n")
+stats.write("preseq_bin_reads\t" + str(preseq_reads) + "\n")
+stats.write("Distinct_lsvs\t" + str(lsv_amount) + "\n")
+stats.write("Delta_psi_lsvs\t" + str(numSig) + "\n")
+stats.write("Total_reads:lsv_reads\t" + str(float(total_reads)/float(lsv_reads)) + "\n")
+stats.write("lsv_reads:bin_reads\t" + str(preseq_to_lsv_reads_ratio) + "\n")
 
 
 
