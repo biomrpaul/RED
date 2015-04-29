@@ -1,0 +1,7 @@
+Total_reads	33088628.0
+lsv_reads	337045.0
+preseq_bin_reads	44051.0
+Distinct_lsvs	11414
+Delta_psi_lsvs	417
+Total_reads:lsv_reads	98.1727306443
+lsv_reads:bin_reads	7.65124514767
