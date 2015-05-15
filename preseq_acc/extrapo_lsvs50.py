@@ -27,10 +27,6 @@ run_majiq = sys.argv[6]
 ##Calculating total amount of reads
 count_reads = sys.argv[7]
 run_build = sys.argv[8]
-step_size = sys.argv[9]
-max_extrap = sys.argv[10]
-max_terms = sys.arv[11]
-max_boot = sys.arv[12]
 
 if count_reads == "count_reads":
 	print("Calculating total amount of reads")
@@ -90,7 +86,7 @@ hist_file_o.close()
 
 ###Extrapolates with preseq   
 print("Running preseq")
-preseq_command = preseq_loc + "preseq lc_extrap -s " + str(max_step) + " -e " + max_extrap + " -x " + max_terms + " -n " + max_boot + " -o " + name + "_extra_bin" + "_" + str(binsize) + ".txt -H " + name + "_hist_values_" + str(binsize) + ".txt"
+preseq_command = preseq_loc + "preseq lc_extrap -o " + name + "_extra_bin" + "_" + str(binsize) + ".txt -H " + name + "_hist_values_" + str(binsize) + ".txt"
 os.system(preseq_command)
 
 preseq_command = preseq_loc + "preseq c_curve -o " + name + "_c_curve.txt -H " +  name + "_hist_values_" + str(binsize) + ".txt"
@@ -202,7 +198,7 @@ exp_delta_lsvs = []
 ##Create new histograms based on the expected amount of captured distinct LSVs from preseq at <population>
 
 
-populations = [25000*i for i in range(80)]
+populations = [150000*i for i in range(12)]
 for population in populations:
 	#Creates a ratio of the ls
 	ratio2 = float(scaled[population][0])/lsv_amount
